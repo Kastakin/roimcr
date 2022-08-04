@@ -9,5 +9,7 @@ name = "pyroimcr"
 crate-type = ["cdylib"]
 
 [dependencies]
+datetime = "0.5.2"
+numpy = "0.16.2"
 pyo3 = { version = "0.16.5", features = ["extension-module", "abi3-py38"] }
 roimcr = { path = ".." }
