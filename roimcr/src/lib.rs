@@ -1,34 +1,53 @@
-mod enums;
+pub mod enums;
 mod file;
-mod structs;
+pub mod structs;
 mod utils;
 
 use ndarray::prelude::*;
 use std::path::Path;
-use utils::ndarray_to_csv;
 
-use crate::enums::{MzErrorType, MzRoiUpdater};
 use crate::file::{load_mzxml, load_netcdf};
 use crate::structs::data::Roicell;
 use crate::structs::options::RoiParams;
 use crate::utils::{argsort, sort_by_indices, subset};
 
-pub fn load_data(path: &str) -> (Vec<Array2<f64>>, Array1<f64>) {
-    let parsed = load_mzxml(Path::new(path)).expect("Error in parsing the file");
+pub fn load_data(path: &str, format: &str) -> (Vec<Array2<f64>>, Array1<f64>) {
+    let parsed = match format.to_lowercase().as_str() {
+        "mzxml" | "xml" => load_mzxml(Path::new(path)).expect("Error in parsing the file"),
+        "netcdf" | "cdf" => load_netcdf(Path::new(path)).expect("Error in parsing the file"),
+        _ => panic!("File format not supported! Supported formats: 'mzxml', 'netcdf'"),
+    };
     let peaks = parsed.get_peaks();
     let times = parsed.get_times();
     (peaks, times)
 }
 
 pub fn compute_roi(
-    peaks_list: &[Array2<f64>],
-    times: &Array1<f64>,
+    peaks_list: &Vec<Vec<Array2<f64>>>,
+    times_list: &Vec<Array1<f64>>,
     settings: RoiParams,
-) -> (Vec<f64>, Roicell) {
+) -> (Array1<f64>, Array2<f64>, Roicell) {
+    let mut merged_peaks: Vec<Array2<f64>> = Vec::new();
+    let mut times: Vec<f64> = Vec::new();
+
+    if peaks_list.len() > 1 {
+        for (scan_num, scan) in peaks_list.iter().enumerate() {
+            for (peak_num, peak) in scan.iter().enumerate() {
+                merged_peaks.push(peak.to_owned());
+                times.push((peak_num + (scan_num * scan.len())) as f64);
+            }
+        }
+    } else {
+        merged_peaks = peaks_list[0].to_owned();
+        times = times_list[0].to_vec();
+    }
+
+    let merged_times = Array1::from_vec(times);
+
     let mut mzroi: Vec<f64> = Vec::new();
     let mut roicell: Roicell = Roicell::new();
 
-    for (scan, peaks) in peaks_list.iter().enumerate() {
+    for (scan, peaks) in merged_peaks.iter().enumerate() {
         if peaks.is_empty() {
             continue;
         }
@@ -66,7 +85,7 @@ pub fn compute_roi(
                     roicell.mzs.len() - 1,
                     &settings.mzroi_updater,
                     mz[i],
-                    times[scan],
+                    merged_times[scan],
                     intensities[i],
                     scan,
                 );
@@ -77,7 +96,7 @@ pub fn compute_roi(
                         roi,
                         &settings.mzroi_updater,
                         mz[i],
-                        times[scan],
+                        merged_times[scan],
                         intensities[i],
                         scan,
                     );
@@ -146,7 +165,8 @@ pub fn compute_roi(
         mzroi.remove(roi);
     }
 
-    let mut msroi: Array2<f64> = Array2::zeros((peaks_list.len(), mzroi.len()));
+    let mzroi: Array1<f64> = arr1(&mzroi);
+    let mut msroi: Array2<f64> = Array2::zeros((merged_peaks.len(), mzroi.len()));
 
     for i in 0..mzroi.len() {
         let nval = roicell.scans[i].len();
@@ -156,5 +176,6 @@ pub fn compute_roi(
             msroi[[irow, i]] += msi;
         }
     }
-    return (mzroi, roicell);
+
+    (mzroi, msroi, roicell)
 }
