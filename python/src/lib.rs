@@ -1,6 +1,10 @@
+use std::path;
+
 use numpy::ndarray::{Array1, Array2};
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2, ToPyArray};
 use pyo3::prelude::*;
+use rayon::prelude::*;
+
 use roimcr::enums::{MzErrorType, MzRoiUpdater};
 use roimcr::structs::options::RoiParams;
 use roimcr::{compute_roi, load_data};
@@ -9,19 +13,34 @@ use roimcr::{compute_roi, load_data};
 /// Load a file .
 fn import_data<'py>(
     py: Python<'py>,
-    path: &str,
+    paths: Vec<&str>,
     format: &str,
-) -> PyResult<(Vec<&'py PyArray2<f64>>, &'py PyArray1<f64>)> {
-    let (peaks, times) = load_data(path, format);
+) -> (Vec<Vec<&'py PyArray2<f64>>>, Vec<&'py PyArray1<f64>>) {
+    let collected_results: Vec<(Vec<Array2<f64>>, Array1<f64>)> = paths
+        .par_iter()
+        .map(|path| load_data(path, format))
+        .collect();
+    let (peaks_list, times_list): (Vec<Vec<Array2<f64>>>, Vec<Array1<f64>>) =
+        collected_results.iter().cloned().unzip();
 
-    Ok((
-        peaks
-            .iter()
-            .cloned()
-            .map(|scan| scan.to_pyarray(py))
-            .collect(),
-        times.to_pyarray(py),
-    ))
+    let peaks_list = peaks_list
+        .iter()
+        .cloned()
+        .map(|peaks| {
+            peaks
+                .iter()
+                .cloned()
+                .map(|scan| scan.to_pyarray(py))
+                .collect()
+        })
+        .collect();
+
+    let times_list = times_list
+        .iter()
+        .cloned()
+        .map(|times| times.to_pyarray(py))
+        .collect();
+    (peaks_list, times_list)
 }
 
 #[pyfunction(
@@ -98,7 +117,7 @@ fn get_roi<'py>(
         })
         .collect();
 
-    let (mzroi, msroi, roicell) = compute_roi(&peaks_list, &times_list, settings);
+    let (mzroi, msroi, _) = compute_roi(&peaks_list, &times_list, settings);
 
     (mzroi.into_pyarray(py), msroi.into_pyarray(py))
 }
