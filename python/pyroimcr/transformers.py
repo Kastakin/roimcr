@@ -1,3 +1,13 @@
+"""
+Module implementing the ROI extraction procedure (Winding et al. 1991).
+This transformer tries to adhere to sklearn formalism for interoperability
+
+Classes
+---------
+RoiExtractor
+    Skleanr compliemnt transformer for roi extraction
+"""
+
 from typing import List, Tuple
 
 from numpy.typing import NDArray
